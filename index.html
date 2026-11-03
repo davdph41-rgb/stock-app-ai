@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#09090b">
+  <title>Stock App AI</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-icon">S</span><span>STOCK<span class="muted">.AI</span></span></div>
+    <div class="side-label">MENU UTAMA</div>
+    <nav>
+      <button class="nav-item active" data-page="dashboard">◫ <span>Dashboard</span></button>
+      <button class="nav-item" data-page="stock">▦ <span>Stock Management</span></button>
+      <button class="nav-item" data-page="sessions">◷ <span>Session Management</span></button>
+      <button class="nav-item" data-page="scanner">▧ <span>AI Receipt Scanner</span><small>SOON</small></button>
+      <button class="nav-item" data-page="audit">⌕ <span>AI Stock Audit</span><small>SOON</small></button>
+      <button class="nav-item" data-page="history">☷ <span>Transaction History</span></button>
+      <button class="nav-item" data-page="reports">▤ <span>Reports</span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="storage-status"><span class="status-dot"></span> Local storage active</div>
+      <button class="nav-item" data-page="settings">⚙ <span>Settings & Backup</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="menu-toggle" id="menuToggle">☰</button>
+      <div><div class="top-title" id="pageTitle">Dashboard</div><div class="top-subtitle" id="today"></div></div>
+      <div class="top-right"><span class="online"><i></i> LOCAL</span><div class="avatar">S</div></div>
+    </header>
+
+    <div class="content">
+
+      <section class="page active" id="dashboard">
+        <div class="welcome">
+          <div><div class="eyebrow">INVENTORY OVERVIEW</div><h1>Stock Dashboard</h1><p>Pantau persediaan dan aktivitas penjualan hari ini.</p></div>
+          <button class="primary-btn" onclick="showPage('stock')">＋ Kelola Stok</button>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-head">Total Menu <span>▦</span></div><div class="stat-value" id="totalMenus">7</div><div class="stat-note">Menu terdaftar</div></div>
+          <div class="stat-card"><div class="stat-head">Total Stok <span>□</span></div><div class="stat-value" id="totalStock">0</div><div class="stat-note">Seluruh item tersedia</div></div>
+          <div class="stat-card"><div class="stat-head">Total Terjual <span>↗</span></div><div class="stat-value" id="totalSold">0</div><div class="stat-note">Penjualan hari ini</div></div>
+          <div class="stat-card"><div class="stat-head">Stok Menipis <span>!</span></div><div class="stat-value" id="lowStock">0</div><div class="stat-note">Perlu diperiksa</div></div>
+        </div>
+        <div class="section-grid">
+          <div class="panel">
+            <div class="panel-heading"><div><h3>Ringkasan Stok</h3><p>Kondisi persediaan setiap menu</p></div><button class="text-btn" onclick="showPage('stock')">Lihat semua →</button></div>
+            <div id="dashboardStock" class="table-wrap"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-heading"><div><h3>Sesi Hari Ini</h3><p>Jadwal operasional</p></div></div>
+            <div id="dashboardSessions"></div>
+          </div>
+        </div>
+        <div class="panel activity-panel">
+          <div class="panel-heading"><div><h3>Aktivitas Terbaru</h3><p>Catatan perubahan stok</p></div><button class="text-btn" onclick="showPage('history')">Semua riwayat →</button></div>
+          <div id="recentActivity"></div>
+        </div>
+      </section>
+
+      <section class="page" id="stock">
+        <div class="page-heading"><div><div class="eyebrow">INVENTORY</div><h1>Stock Management</h1><p>Kelola persediaan seluruh menu.</p></div></div>
+        <div class="toolbar"><input id="stockSearch" placeholder="Cari menu..." oninput="renderStock()"><button class="primary-btn" onclick="openStockModal()">＋ Tambah Stok</button></div>
+        <div class="panel"><div id="stockTable" class="table-wrap"></div></div>
+      </section>
+
+      <section class="page" id="sessions">
+        <div class="page-heading"><div><div class="eyebrow">OPERATIONS</div><h1>Session Management</h1><p>Rekap penjualan berdasarkan sesi operasional.</p></div></div>
+        <div class="session-control panel">
+          <div><span class="field-label">JENIS HARI</span><select id="dayType" onchange="renderSessions()"><option value="auto">Otomatis sesuai tanggal</option><option value="weekday">Weekday</option><option value="weekend">Weekend</option></select></div>
+          <div><span class="field-label">TANGGAL</span><input type="date" id="sessionDate" onchange="renderSessions()"></div>
+        </div>
+        <div id="sessionList"></div>
+      </section>
+
+      <section class="page" id="scanner">
+        <div class="page-heading"><div><div class="eyebrow">ARTIFICIAL INTELLIGENCE</div><h1>AI Receipt Scanner</h1><p>Pembacaan otomatis nota penjualan menggunakan AI.</p></div></div>
+        <div class="panel coming-soon">
+          <div class="coming-icon">▧</div><h2>AI Receipt Scanner</h2><p>Fitur ini akan membaca foto nota, mengenali nama menu dan jumlah terjual, lalu menyusun laporan sesi secara otomatis.</p>
+          <span class="coming-label">AI INTEGRATION — PLANNED</span>
+          <div class="notice">Integrasi Gemini Vision akan ditambahkan melalui backend. Jangan memasukkan API key rahasia ke JavaScript yang dipublikasikan di GitHub.</div>
+        </div>
+      </section>
+
+      <section class="page" id="audit">
+        <div class="page-heading"><div><div class="eyebrow">INVENTORY INTELLIGENCE</div><h1>AI Stock Audit</h1><p>Bandingkan stok sistem dengan stok fisik.</p></div></div>
+        <div class="panel">
+          <div class="panel-heading"><div><h3>Pemeriksaan Stok Fisik</h3><p>Masukkan hasil hitung manual sekarang. Fitur kamera AI menyusul.</p></div></div>
+          <div id="auditTable" class="table-wrap"></div>
+          <button class="primary-btn" onclick="saveAudit()">Simpan Pemeriksaan</button>
+          <div id="auditResult"></div>
+        </div>
+      </section>
+
+      <section class="page" id="history">
+        <div class="page-heading"><div><div class="eyebrow">RECORDS</div><h1>Transaction History</h1><p>Riwayat transaksi dan perubahan stok.</p></div></div>
+        <div class="panel"><div id="historyTable" class="table-wrap"></div></div>
+      </section>
+
+      <section class="page" id="reports">
+        <div class="page-heading"><div><div class="eyebrow">ANALYTICS</div><h1>Reports</h1><p>Ringkasan penjualan dan penggunaan stok.</p></div></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-head">Total Reservasi</div><div class="stat-value" id="reportReservation">0</div></div>
+          <div class="stat-card"><div class="stat-head">Total Penjualan</div><div class="stat-value" id="reportSales">0</div></div>
+          <div class="stat-card"><div class="stat-head">Total Stok Tersisa</div><div class="stat-value" id="reportRemaining">0</div></div>
+        </div>
+        <div class="panel"><div class="panel-heading"><div><h3>Rekap per Menu</h3><p>Akumulasi data yang tersimpan</p></div><button class="secondary-btn" onclick="exportCSV()">↓ Export CSV</button></div><div id="reportTable" class="table-wrap"></div></div>
+      </section>
+
+      <section class="page" id="settings">
+        <div class="page-heading"><div><div class="eyebrow">PREFERENCES</div><h1>Settings & Backup</h1><p>Atur data dan keamanan penyimpanan.</p></div></div>
+        <div class="panel settings-panel">
+          <h3>Backup Data</h3><p>Unduh salinan data aplikasi dalam format JSON.</p><button class="primary-btn" onclick="backupData()">↓ Download Backup</button>
+          <hr>
+          <h3>Restore Data</h3><p>Pulihkan data dari file backup sebelumnya.</p><input type="file" id="restoreFile" accept=".json"><button class="secondary-btn" onclick="restoreData()">Restore Data</button>
+          <hr>
+          <h3>Pengaturan Stok</h3><p>Atur batas stok menipis untuk memberikan peringatan.</p><label class="field-label">BATAS STOK MENIPIS</label><input type="number" id="lowLimit" min="0"><button class="secondary-btn" onclick="saveSettings()">Simpan Pengaturan</button>
+          <hr>
+          <h3>Reset Aplikasi</h3><p>Hapus seluruh data lokal. Tindakan ini tidak dapat dibatalkan.</p><button class="danger-btn" onclick="resetApp()">Reset Semua Data</button>
+        </div>
+      </section>
+
+    </div>
+    <footer>STOCK.AI <span>•</span> Inventory Management System <span>•</span> v1.0</footer>
+  </main>
+</div>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div class="modal-heading"><h3 id="modalTitle">Tambah Stok</h3><button onclick="closeModal()">✕</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script src="script.js"></script>
+</body>
+  </html>
