@@ -67,8 +67,21 @@
       </section>
 
       <section class="page" id="page-scanner">
-        <div class="page-intro"><div><h2>AI Receipt Scanner</h2><p>Area persiapan untuk membaca struk sesi menggunakan AI.</p></div><span class="pill warning">Integrasi AI belum aktif</span></div>
-        <div class="scanner-box"><div class="scanner-symbol">⌁</div><h3>Unggah foto struk</h3><p>Fitur pembacaan otomatis membutuhkan koneksi AI dan backend yang aman. Untuk sementara, catat angka dari struk melalui Manajemen Sesi.</p><label class="upload-control">Pilih Foto Struk<input id="receiptFile" type="file" accept="image/*"></label><p id="receiptName" class="muted"></p></div>
+        <div class="page-intro"><div><h2>AI Receipt Scanner</h2><p>Unggah nota. AI membaca tanggal, jam, menu, dan jumlah terjual.</p></div><span class="pill warning" id="scannerStatus">Perlu API Key Gemini</span></div>
+        <div class="scanner-box">
+          <div class="scanner-symbol">⌁</div><h3>Pindai nota penjualan</h3>
+          <p>Gunakan foto nota yang jelas dan seluruh bagian tanggal serta jam terlihat. Sesi akan ditentukan otomatis dari tanggal dan waktu yang tercetak.</p>
+          <label class="upload-control">Pilih Foto Nota<input id="receiptFile" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <p id="receiptName" class="muted"></p>
+          <button class="btn primary" id="scanReceiptBtn" disabled>✦ Analisis Nota dengan AI</button>
+          <p id="scanMessage" class="muted"></p>
+        </div>
+        <div class="panel scan-result-panel" id="scanResultPanel" hidden>
+          <div class="panel-heading"><div><h3>Hasil Pembacaan AI</h3><p>Periksa hasilnya sebelum menyimpan. Konfirmasi akan mengunci sesi agar tidak diproses dua kali.</p></div><span class="pill" id="detectedSession"></span></div>
+          <div class="scan-meta" id="scanMeta"></div>
+          <div class="table-wrap"><table><thead><tr><th>Menu pada Nota</th><th>Jumlah</th><th>Status Pencocokan</th></tr></thead><tbody id="scanItemsTable"></tbody></table></div>
+          <div class="scan-actions"><button class="btn ghost" id="discardScanBtn">Batalkan</button><button class="btn primary" id="confirmScanBtn">Konfirmasi & Kunci Sesi</button></div>
+        </div>
       </section>
 
       <section class="page" id="page-audit">

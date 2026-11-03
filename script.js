@@ -3,7 +3,7 @@
 const DB_KEY = 'stock_app_ai_v2';
 const DEFAULT_MENUS = ['French Fries','Chicken Wings','Prawn Mayo','Mekencis','Beef Burger','Fish & Chips','Mix Platters'];
 const $ = (id) => document.getElementById(id);
-const today = () => new Date().toISOString().slice(0,10);
+const today = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const nowText = () => new Date().toLocaleString('id-ID');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
@@ -16,6 +16,7 @@ function loadDB(){
   catch(e){console.error(e);return freshDB();}
 }
 let db = loadDB();
+let pendingReceipt = null;
 function saveDB(){localStorage.setItem(DB_KEY,JSON.stringify(db));}
 function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),2600);}
 function log(action,menu,qty,note=''){db.history.unshift({id:uid(),time:nowText(),date:today(),action,menu,qty:Number(qty)||0,note});saveDB();}
@@ -23,8 +24,7 @@ function getMenu(id){return db.menus.find(m=>m.id===id);}
 function daySessions(date=today()){const d=new Date(date+'T12:00:00').getDay();return [0,6].includes(d)?[{id:'s1',name:'Sesi 1',time:'10:00–12:00'},{id:'s2',name:'Sesi 2',time:'12:00–15:00'},{id:'s3',name:'Sesi 3',time:'15:00–17:00'}]:[{id:'s1',name:'Sesi 1',time:'12:00–15:00'},{id:'s2',name:'Sesi 2',time:'15:00–17:00'}];}
 function sessionKey(date,sid){return date+'_'+sid;}
 function getSession(date,sid){return db.sessions[sessionKey(date,sid)]||{date,sid,closed:false,sales:{}};}
-function soldForMenu(id){return db.history.filter(h=>h.menuId===id&&['Penjualan manual','Penjualan sesi'].includes(h.action)).reduce((a,h)=>a+h.qty,0);}
-function sessionSold(id){return soldForMenu(id);}
+function sessionSold(id){return db.history.filter(h=>h.menuId===id&&h.action==='Penjualan sesi').reduce((a,h)=>a+h.qty,0);}
 function available(m){return Math.max(0,Number(m.stock||0)-Number(m.reservation||0)-Number(m.manual||0)-sessionSold(m.id));}
 function soldToday(){return db.history.filter(h=>h.date===today()&&['Penjualan manual','Penjualan sesi'].includes(h.action)).reduce((a,h)=>a+h.qty,0);}
 function statusHTML(n){return n<=0?'<span class="status empty">Habis</span>':n<=5?'<span class="status low">Menipis</span>':'<span class="status good">Aman</span>';}
@@ -91,7 +91,108 @@ $('reservationTable').addEventListener('click',e=>{const b=e.target.closest('[da
 $('sessionForm').addEventListener('submit',e=>{e.preventDefault();const sid=$('sessionSelect').value,m=getMenu($('sessionMenu').value),q=Number($('sessionQty').value),s=getSession(today(),sid);if(!m||q<1)return;if(s.closed){toast('Sesi sudah dikunci.');return;}if(q>available(m)){toast('Jumlah melebihi stok tersedia.');return;}s.sales[m.id]=(s.sales[m.id]||0)+q;db.sessions[sessionKey(today(),sid)]=s;db.history.unshift({id:uid(),time:nowText(),date:today(),action:'Penjualan sesi',menu:m.name,menuId:m.id,qty:q,note:$('sessionSelect').selectedOptions[0].textContent});saveDB();e.target.reset();renderAll();toast('Penjualan sesi tersimpan.');});
 $('sessionCards').addEventListener('click',e=>{const b=e.target.closest('[data-session-close]');if(!b)return;const sid=b.dataset.sessionClose,s=getSession(today(),sid);if(s.closed)return;if(!confirm('Tutup dan kunci sesi ini? Setelah ditutup, data penjualan sesi tidak dapat diubah.'))return;s.closed=true;s.closedAt=nowText();db.sessions[sessionKey(today(),sid)]=s;log('Sesi dikunci',sid,0,'Sesi ditutup permanen');renderAll();toast('Sesi berhasil dikunci.');});
 $('auditForm').addEventListener('submit',e=>{e.preventDefault();const m=getMenu($('auditMenu').value),physical=Number($('physicalQty').value);if(!m||physical<0)return;const system=available(m),a={id:uid(),time:nowText(),menu:m.name,system,physical,diff:physical-system,note:$('auditNote').value};db.audits.unshift(a);log('Audit stok',m.name,physical,`Sistem ${system}; fisik ${physical}; selisih ${a.diff}`);e.target.reset();renderAll();toast(a.diff===0?'Stok sesuai.':'Ditemukan selisih stok.');});
-$('receiptFile').addEventListener('change',()=>{$('receiptName').textContent=$('receiptFile').files[0]?.name||'';toast('Foto dipilih. AI scanner belum dihubungkan.');});
+$('receiptFile').addEventListener('change',()=>{
+  const file=$('receiptFile').files[0];
+  $('receiptName').textContent=file?file.name:'';
+  $('scanReceiptBtn').disabled=!file;
+  $('scanResultPanel').hidden=true;
+  pendingReceipt=null;
+  $('scanMessage').textContent=file?'Foto siap dianalisis.':'';
+});
+function classifyReceiptSession(dateStr,timeStr){
+  if(!dateStr||!timeStr)return null;
+  const date=new Date(dateStr+'T12:00:00');
+  if(Number.isNaN(date.getTime()))return null;
+  const parts=timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if(!parts)return null;
+  const minutes=Number(parts[1])*60+Number(parts[2]);
+  if(Number(parts[1])>23||Number(parts[2])>59)return null;
+  const weekend=[0,6].includes(date.getDay());
+  const ranges=weekend?[
+    {id:'s1',name:'Sesi 1',start:600,end:720},
+    {id:'s2',name:'Sesi 2',start:720,end:900},
+    {id:'s3',name:'Sesi 3',start:900,end:1020}
+  ]:[
+    {id:'s1',name:'Sesi 1',start:720,end:900},
+    {id:'s2',name:'Sesi 2',start:900,end:1020}
+  ];
+  const found=ranges.find(x=>minutes>=x.start&&minutes<x.end);
+  return found?{...found,date:dateStr,weekend}:null;
+}
+async function compressReceipt(file){
+  if(!file.type.match(/^image\/(jpeg|png|webp)$/))throw new Error('Gunakan foto JPG, PNG, atau WEBP.');
+  const img=await createImageBitmap(file);
+  const scale=Math.min(1,1800/Math.max(img.width,img.height));
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
+  canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.82));
+  if(!blob)throw new Error('Foto tidak dapat diproses.');
+  const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(blob);});
+  return {base64:String(dataUrl).split(',')[1],mimeType:'image/jpeg'};
+}
+$('scanReceiptBtn').addEventListener('click',async()=>{
+  const file=$('receiptFile').files[0];if(!file)return;
+  const btn=$('scanReceiptBtn');btn.disabled=true;btn.textContent='Sedang membaca nota...';
+  $('scanMessage').textContent='AI sedang membaca tanggal, jam, nama menu, dan jumlah.';
+  try{
+    const image=await compressReceipt(file);
+    const response=await fetch('/api/scan-receipt',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...image,menuNames:db.menus.map(m=>m.name)})
+    });
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||'Gagal membaca nota.');
+    if(!result.receiptTime)throw new Error('Jam pada nota tidak terbaca. Coba foto yang lebih jelas.');
+    const receiptDate=result.receiptDate||today();
+    const session=classifyReceiptSession(receiptDate,result.receiptTime);
+    if(!session)throw new Error('Tanggal atau jam nota tidak masuk jadwal sesi. Periksa nota secara manual.');
+    const existing=getSession(session.date,session.id);
+    if(existing.closed||existing.receiptProcessed)throw new Error('Sesi ini sudah dikunci atau pernah diproses. Nota duplikat ditolak.');
+    const mapped=(result.items||[]).map(item=>{
+      const normalized=String(item.menu||'').trim().toLowerCase();
+      const menu=db.menus.find(m=>m.name.toLowerCase()===normalized)||
+        db.menus.find(m=>normalized.includes(m.name.toLowerCase())||m.name.toLowerCase().includes(normalized));
+      return {...item,matchedMenuId:menu?.id||null,matchedMenuName:menu?.name||null};
+    });
+    if(!mapped.length)throw new Error('AI tidak menemukan item menu pada nota.');
+    pendingReceipt={date:session.date,sessionId:session.id,sessionName:session.name,time:result.receiptTime,items:mapped,rawDate:result.receiptDate||null};
+    $('detectedSession').textContent=session.name+' · '+(session.weekend?'Akhir pekan':'Hari kerja');
+    $('scanMeta').innerHTML=`<span>Tanggal: <strong>${esc(receiptDate)}${result.receiptDate?'':' (memakai tanggal hari ini)'}</strong></span><span>Jam nota: <strong>${esc(result.receiptTime)}</strong></span><span>Hari: <strong>${session.weekend?'Akhir pekan':'Hari kerja'}</strong></span>`;
+    $('scanItemsTable').innerHTML=mapped.map(x=>`<tr><td>${esc(x.menu)}</td><td>${Number(x.quantity)||0}</td><td>${x.matchedMenuId?'<span class="match-ok">Cocok: '+esc(x.matchedMenuName)+'</span>':'<span class="match-warn">Perlu diperiksa: menu tidak dikenal</span>'}</td></tr>`).join('');
+    $('scanResultPanel').hidden=false;
+    $('scanMessage').textContent='Periksa semua item dan jumlah sebelum konfirmasi.';
+    toast('Nota berhasil dianalisis.');
+  }catch(err){$('scanMessage').textContent=err.message;toast(err.message);}
+  finally{btn.disabled=!$('receiptFile').files[0];btn.textContent='✦ Analisis Nota dengan AI';}
+});
+$('discardScanBtn').addEventListener('click',()=>{pendingReceipt=null;$('scanResultPanel').hidden=true;$('scanMessage').textContent='Hasil analisis dibatalkan.';});
+$('confirmScanBtn').addEventListener('click',()=>{
+  if(!pendingReceipt)return;
+  const p=pendingReceipt,s=getSession(p.date,p.sessionId);
+  if(s.closed||s.receiptProcessed){toast('Sesi sudah diproses.');return;}
+  const sales={};
+  for(const item of p.items){
+    const m=getMenu(item.matchedMenuId),q=Math.floor(Number(item.quantity));
+    if(!m||!Number.isFinite(q)||q<1){toast('Ada menu atau jumlah yang belum valid.');return;}
+    sales[m.id]=(sales[m.id]||0)+q;
+  }
+  for(const [menuId,q] of Object.entries(sales)){
+    const m=getMenu(menuId);
+    if(q>available(m)){toast('Penjualan '+m.name+' melebihi stok tersedia. Periksa hasil AI.');return;}
+  }
+  s.sales=sales;s.receiptProcessed=true;s.closed=true;s.receiptTime=p.time;s.closedAt=nowText();
+  db.sessions[sessionKey(p.date,p.sessionId)]=s;
+  // Replace earlier manual session entries for this same date/session so the cumulative receipt is not double-counted.
+  db.history=db.history.filter(h=>!(h.action==='Penjualan sesi'&&h.date===p.date&&String(h.note||'').startsWith(p.sessionName)));
+  for(const [menuId,q] of Object.entries(sales)){
+    const m=getMenu(menuId);
+    db.history.unshift({id:uid(),time:nowText(),date:p.date,action:'Penjualan sesi',menu:m.name,menuId:m.id,qty:q,note:`Nota AI ${p.sessionName} · ${p.time}`});
+  }
+  log('Nota AI dikonfirmasi',p.sessionName,0,`Tanggal ${p.date}, jam ${p.time}; sesi dikunci`);
+  pendingReceipt=null;$('scanResultPanel').hidden=true;$('receiptFile').value='';$('receiptName').textContent='';$('scanReceiptBtn').disabled=true;
+  renderAll();toast('Nota disimpan dan sesi dikunci.');
+});
 $('clearHistoryBtn').addEventListener('click',()=>{if(!confirm('Hapus seluruh riwayat transaksi? Data stok tidak berubah.'))return;db.history=[];saveDB();renderAll();toast('Riwayat dihapus.');});
 $('exportCsvBtn').addEventListener('click',()=>{const rows=[['Menu','Stok Awal','Reservasi','Terjual','Tersedia'],...db.menus.map(m=>[m.name,m.stock,m.reservation,m.manual+sessionSold(m.id),available(m)])];const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');download('laporan-stok.csv',csv,'text/csv');});
 function download(name,content,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
