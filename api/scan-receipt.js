@@ -33,7 +33,7 @@ Aturan:
 - Jika nota berisi total kuantitas per item, gunakan kuantitas tersebut satu kali.
 - Jangan mengarang data dan jangan menambahkan penjelasan di luar JSON.
 `;
-    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent';
     const geminiResponse = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
