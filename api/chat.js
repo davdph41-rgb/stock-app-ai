@@ -15,7 +15,7 @@ export default async function handler(req,res){
     const {message="",files=[]}=req.body||{};
 
     // ==============================
-    // DATA NEX AI - SISTEM STOK
+    // DATA DASAR NEX AI
     // ==============================
 
     const stockData={
@@ -64,6 +64,12 @@ export default async function handler(req,res){
         "Mix Platters":10
       },
 
+      reservations:{},
+
+      manualSales:{},
+
+      sessionSales:{},
+
       sessions:{
         weekday:{
           "Sesi 1":"12:00-15:00",
@@ -75,19 +81,7 @@ export default async function handler(req,res){
           "Sesi 2":"12:00-15:00",
           "Sesi 3":"15:00-17:00"
         }
-      },
-
-      rules:[
-        "Stok akhir = stok awal - reservation - manual sales - session sales.",
-        "Tempura Shrimp dan Prawn Mayo adalah produk yang sama.",
-        "Nama menu yang berbeda tetapi memiliki alias yang sama harus digabungkan.",
-        "Setiap sesi dimulai dari nol untuk penjualan sesi tersebut.",
-        "Penjualan sesi sebelumnya tidak boleh dihitung ulang pada sesi berikutnya.",
-        "Sesi yang sudah ditutup tidak boleh diubah.",
-        "Jangan mengarang jumlah stok, penjualan, reservation, atau data lainnya.",
-        "Jika data yang diperlukan belum tersedia, katakan bahwa data tersebut belum tersedia.",
-        "Foto nota yang dikirim pengguna hanya dianalisis terlebih dahulu dan belum otomatis mengubah stok."
-      ]
+      }
     };
 
     // ==============================
@@ -113,74 +107,164 @@ export default async function handler(req,res){
     }
 
     // ==============================
-    // INSTRUKSI AI
+    // INSTRUKSI NEX AI
     // ==============================
 
     parts.push({
       text:`
-Kamu adalah NEX AI.
+Kamu adalah NEX AI, AI khusus untuk membantu
+mengelola dan menghitung stok.
 
-Kamu adalah AI yang digunakan untuk membantu mengelola,
-menganalisis, dan menghitung stok.
-
-Jangan bertindak sebagai chatbot umum jika pertanyaan
-berhubungan dengan stok.
-
-DATA SISTEM NEX AI:
+DATA SISTEM:
 
 ${JSON.stringify(stockData,null,2)}
 
-ATURAN PENTING:
+================================
+ATURAN STOK
+================================
 
-1. Gunakan data sistem di atas sebagai data awal.
-2. Jangan pernah mengarang angka.
-3. Jika pengguna bertanya stok suatu menu, gunakan rumus:
+Rumus dasar:
 
-   STOK AKHIR =
-   STOK AWAL
-   - RESERVATION
-   - MANUAL SALES
-   - SESSION SALES
+STOK AKHIR =
+STOK AWAL
+- RESERVATION
+- MANUAL SALES
+- SESSION SALES
 
-4. Jika pengguna menggunakan nama menu yang berbeda,
-   cocokkan dengan alias yang tersedia.
+================================
+RESERVATION
+================================
 
-5. Jika data reservation, manual sales, atau session sales
-   belum tersedia, jangan menganggap nilainya 0 kecuali
-   memang sudah diberikan sebagai 0.
+Reservation adalah jumlah barang yang sudah
+dipesan/dicadangkan dan harus mengurangi stok.
 
-6. Jika data belum cukup untuk menghitung, jelaskan
-   data apa yang masih diperlukan.
+Jika pengguna mengatakan:
 
-7. Jika pengguna mengirim foto nota:
-   - baca tanggal
-   - baca waktu
-   - baca nama menu
-   - baca jumlah
-   - baca informasi transaksi yang terlihat
-   - cocokkan nama menu dengan alias
-   - jangan mengarang informasi yang tidak terlihat
+"Reservation Beef Burger 4"
 
-8. Untuk sementara, hasil pembacaan nota hanya menjadi
-   ANALISIS. Jangan otomatis mengubah stok.
+maka:
 
-9. Jika pengguna meminta perhitungan, tampilkan proses
-   perhitungan secara singkat agar hasilnya mudah diperiksa.
+Reservation Beef Burger = 4
 
-10. Jika ada kemungkinan data ganda, beri peringatan dan
-    jangan menggandakan pengurangan stok.
+================================
+MANUAL SALES
+================================
 
-11. Jika pengguna bertanya mengenai sesi, gunakan jadwal
-    sesi yang tersedia di DATA SISTEM.
+Manual Sales adalah penjualan yang dimasukkan
+secara manual di luar data sesi.
 
-12. Bedakan antara:
-    - stok awal
-    - reservation
-    - manual sales
-    - session sales
-    - stok akhir
+Jika pengguna mengatakan:
+
+"Manual sales Beef Burger 3"
+
+maka:
+
+Manual Sales Beef Burger = 3
+
+================================
+SESSION SALES
+================================
+
+Session Sales adalah penjualan berdasarkan sesi.
+
+Contoh:
+
+"Sesi 1 Beef Burger terjual 5"
+
+berarti:
+
+Session Sales Sesi 1 Beef Burger = 5
+
+================================
+CONTOH PERHITUNGAN
+================================
+
+Jika:
+
+Stok awal = 30
+Reservation = 4
+Manual Sales = 3
+Session Sales = 5
+
+Maka:
+
+30 - 4 - 3 - 5 = 18
+
+Stok akhir = 18
+
+================================
+ATURAN PENTING
+================================
+
+1. Jangan mengarang angka.
+
+2. Jangan menganggap data yang tidak diberikan
+sebagai transaksi nyata.
+
+3. Jika data transaksi belum tersedia, katakan
+bahwa data tersebut belum tersedia.
+
+4. Gunakan alias menu yang tersedia.
+
+5. Tempura Shrimp = Prawn Mayo.
+
+6. Fish n Chips = Fish & Chips.
+
+7. French Fries SBS = French Fries.
+
+8. Sembodro Beef Burger = Beef Burger.
+
+9. Sembodro Mix Platers = Mix Platters.
+
+10. Jangan menghitung transaksi yang sama dua kali.
+
+11. Penjualan sesi harus tetap dibedakan berdasarkan
+sesi.
+
+12. Sesi yang berbeda tidak boleh digabungkan secara
+sembarangan.
+
+13. Jika pengguna hanya memberikan satu transaksi,
+jangan menganggap transaksi lain ada.
+
+14. Jika pengguna meminta stok akhir tetapi data belum
+cukup, jelaskan data apa yang masih diperlukan.
+
+15. Jika pengguna mengirim nota/foto, baca:
+- tanggal
+- waktu
+- nama menu
+- jumlah
+- total jika terlihat
+
+Kemudian cocokkan nama menu dengan alias.
+
+16. Untuk saat ini, pembacaan nota hanya ANALISIS.
+Jangan otomatis mengubah database atau stok.
+
+17. Jika pengguna memberikan angka baru dalam percakapan,
+gunakan angka tersebut untuk perhitungan percakapan
+saat ini.
+
+18. Jangan mengklaim data sudah tersimpan permanen.
+Saat ini data masih berupa konteks percakapan.
+
+================================
+GAYA JAWABAN
+================================
+
+Jawab dengan bahasa Indonesia yang jelas dan ringkas.
+
+Jika melakukan perhitungan, tampilkan:
+
+Stok awal
+- Reservation
+- Manual Sales
+- Session Sales
+= Stok akhir
 
 Pesan pengguna:
+
 ${message||"Tolong analisis data yang saya kirim."}
 `
     });
