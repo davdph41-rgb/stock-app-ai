@@ -1,633 +1,103 @@
-/* =====================================
-   STOCK APP AI — CORE SYSTEM
-===================================== */
+'use strict';
 
-const DB_KEY = "stock_ai_v1";
+const DB_KEY = 'stock_app_ai_v2';
+const DEFAULT_MENUS = ['French Fries','Chicken Wings','Prawn Mayo','Mekencis','Beef Burger','Fish & Chips','Mix Platters'];
+const $ = (id) => document.getElementById(id);
+const today = () => new Date().toISOString().slice(0,10);
+const nowText = () => new Date().toLocaleString('id-ID');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 
-const DEFAULT_MENUS = [
-  {id:"fries",name:"French Fries",stock:0,reservation:0,manual:0},
-  {id:"wings",name:"Chicken Wings",stock:0,reservation:0,manual:0},
-  {id:"prawn",name:"Prawn Mayo",stock:0,reservation:0,manual:0},
-  {id:"mekencis",name:"Mekencis",stock:0,reservation:0,manual:0},
-  {id:"beef",name:"Beef Burger",stock:0,reservation:0,manual:0},
-  {id:"fish",name:"Fish & Chips",stock:0,reservation:0,manual:0},
-  {id:"mix",name:"Mix Platters",stock:0,reservation:0,manual:0}
-];
-
-let db = loadDB();
-
+function freshDB(){
+  return {version:2,menus:DEFAULT_MENUS.map(name=>({id:uid(),name,stock:0,reservation:0,manual:0})),sessions:{},history:[],audits:[],reservations:[]};
+}
 function loadDB(){
-  try{
-    const saved = JSON.parse(localStorage.getItem(DB_KEY));
-    if(saved && Array.isArray(saved.menus)){
-      return {
-        ...saved,
-        menus:saved.menus,
-        sessions:saved.sessions || {},
-        history:saved.history || [],
-        audits:saved.audits || [],
-        settings:{lowLimit:5,...saved.settings}
-      };
-    }
-  }catch(e){console.error(e)}
-
-  return {
-    menus:structuredClone(DEFAULT_MENUS),
-    sessions:{},
-    history:[],
-    audits:[],
-    settings:{lowLimit:5}
-  };
+  try{const raw=localStorage.getItem(DB_KEY);if(!raw)return freshDB();const d=JSON.parse(raw);if(!d||!Array.isArray(d.menus))return freshDB();d.sessions ||= {};d.history ||= [];d.audits ||= [];d.reservations ||= [];return d;}
+  catch(e){console.error(e);return freshDB();}
 }
+let db = loadDB();
+function saveDB(){localStorage.setItem(DB_KEY,JSON.stringify(db));}
+function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),2600);}
+function log(action,menu,qty,note=''){db.history.unshift({id:uid(),time:nowText(),date:today(),action,menu,qty:Number(qty)||0,note});saveDB();}
+function getMenu(id){return db.menus.find(m=>m.id===id);}
+function daySessions(date=today()){const d=new Date(date+'T12:00:00').getDay();return [0,6].includes(d)?[{id:'s1',name:'Sesi 1',time:'10:00–12:00'},{id:'s2',name:'Sesi 2',time:'12:00–15:00'},{id:'s3',name:'Sesi 3',time:'15:00–17:00'}]:[{id:'s1',name:'Sesi 1',time:'12:00–15:00'},{id:'s2',name:'Sesi 2',time:'15:00–17:00'}];}
+function sessionKey(date,sid){return date+'_'+sid;}
+function getSession(date,sid){return db.sessions[sessionKey(date,sid)]||{date,sid,closed:false,sales:{}};}
+function soldForMenu(id){return db.history.filter(h=>h.menuId===id&&['Penjualan manual','Penjualan sesi'].includes(h.action)).reduce((a,h)=>a+h.qty,0);}
+function sessionSold(id){return soldForMenu(id);}
+function available(m){return Math.max(0,Number(m.stock||0)-Number(m.reservation||0)-Number(m.manual||0)-sessionSold(m.id));}
+function soldToday(){return db.history.filter(h=>h.date===today()&&['Penjualan manual','Penjualan sesi'].includes(h.action)).reduce((a,h)=>a+h.qty,0);}
+function statusHTML(n){return n<=0?'<span class="status empty">Habis</span>':n<=5?'<span class="status low">Menipis</span>':'<span class="status good">Aman</span>';}
+function emptyRow(cols,msg='Belum ada data.'){return `<tr><td colspan="${cols}" class="empty-cell">${msg}</td></tr>`;}
 
-function saveDB(){
-  localStorage.setItem(DB_KEY,JSON.stringify(db));
-}
-
-function money(n){
-  return Number(n||0).toLocaleString("id-ID");
-}
-
-function getMenu(id){
-  return db.menus.find(m=>m.id===id);
-}
-
-function sessionSold(id){
-  return Object.values(db.sessions).reduce(
-    (sum,s)=>sum+(s.items?.[id]||0),0
-  );
-}
-
-function remaining(m){
-  return m.stock-m.reservation-m.manual-sessionSold(m.id);
-}
-
-function totalSold(){
-  return db.menus.reduce(
-    (sum,m)=>sum+m.manual+sessionSold(m.id),0
-  );
-}
-
-function addHistory(type,menu,qty,detail=""){
-  db.history.unshift({
-    id:Date.now()+Math.random(),
-    date:new Date().toISOString(),
-    type,menu,qty,detail
-  });
-  saveDB();
-}
-
-function toast(message){
-  const el=document.getElementById("toast");
-  el.textContent=message;
-  el.classList.add("show");
-  setTimeout(()=>el.classList.remove("show"),2400);
-}
-
-/* =====================================
-   NAVIGATION
-===================================== */
-
-function showPage(page){
-  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  document.querySelectorAll(".nav-item[data-page]").forEach(b=>b.classList.remove("active"));
-
-  document.getElementById(page)?.classList.add("active");
-  document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add("active");
-
-  const names={
-    dashboard:"Dashboard",
-    stock:"Stock Management",
-    sessions:"Session Management",
-    scanner:"AI Receipt Scanner",
-    audit:"AI Stock Audit",
-    history:"Transaction History",
-    reports:"Reports",
-    settings:"Settings & Backup"
-  };
-
-  document.getElementById("pageTitle").textContent=names[page]||page;
-  document.getElementById("sidebar").classList.remove("open");
-
+function showPage(name){
+  const page=$('page-'+name);if(!page)return;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  page.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  const button=document.querySelector(`.nav-item[data-page="${name}"]`);
+  $('pageTitle').textContent=button?button.textContent.trim():'Dashboard';
+  $('sidebar').classList.remove('open');
   renderAll();
 }
+document.querySelectorAll('.nav-item').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.goto)));
+$('menuToggle').addEventListener('click',()=>$('sidebar').classList.toggle('open'));
+document.addEventListener('click',e=>{if(window.innerWidth<=760&&!$('sidebar').contains(e.target)&&!e.target.closest('#menuToggle'))$('sidebar').classList.remove('open');});
 
-document.querySelectorAll(".nav-item[data-page]").forEach(btn=>{
-  btn.addEventListener("click",()=>showPage(btn.dataset.page));
-});
-
-document.getElementById("menuToggle").onclick=()=>{
-  document.getElementById("sidebar").classList.toggle("open");
-};
-
-/* =====================================
-   DATE & SESSION SYSTEM
-===================================== */
-
-function localDate(){
-  const d=new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-
-function getDayType(date){
-  const day=new Date(date+"T12:00:00").getDay();
-  return day===0||day===6?"weekend":"weekday";
-}
-
-function getSchedule(type){
-  if(type==="weekend"){
-    return [
-      {name:"Sesi 1",time:"10.00 – 12.00"},
-      {name:"Sesi 2",time:"12.00 – 15.00"},
-      {name:"Sesi 3",time:"15.00 – 17.00"}
-    ];
-  }
-
-  return [
-    {name:"Sesi 1",time:"12.00 – 15.00"},
-    {name:"Sesi 2",time:"15.00 – 17.00"}
-  ];
-}
-
-function getSessionKey(date,index){
-  return `${date}_session_${index}`;
-}
-
-function getSession(date,index){
-  const key=getSessionKey(date,index);
-
-  if(!db.sessions[key]){
-    db.sessions[key]={
-      date,index,items:{},locked:false,createdAt:new Date().toISOString()
-    };
-    saveDB();
-  }
-
-  return db.sessions[key];
-}
-
-function renderSessions(){
-  const date=document.getElementById("sessionDate").value||localDate();
-  const selected=document.getElementById("dayType").value;
-  const type=selected==="auto"?getDayType(date):selected;
-  const schedule=getSchedule(type);
-
-  document.getElementById("sessionList").innerHTML=schedule.map((item,i)=>{
-    const s=getSession(date,i+1);
-    const total=Object.values(s.items).reduce((a,b)=>a+b,0);
-
-    const chips=db.menus.filter(m=>s.items[m.id]>0).map(m=>
-      `<span class="session-chip">${m.name}: <b>${s.items[m.id]}</b></span>`
-    ).join("");
-
-    return `
-      <div class="session-card">
-        <div class="session-top">
-          <div>
-            <h3>${item.name}</h3>
-            <div class="session-meta">${item.time} · ${date}</div>
-          </div>
-          <span class="pill ${s.locked?"good":"low"}">${s.locked?"TERKUNCI":"TERBUKA"}</span>
-        </div>
-        <div class="session-meta">Total penjualan: <b>${total} item</b></div>
-        <div class="session-items">${chips||'<span class="empty">Belum ada data penjualan.</span>'}</div>
-        <div class="session-buttons">
-          ${!s.locked?`
-            <button class="secondary-btn" onclick="openSessionSale('${date}',${i+1})">＋ Input Penjualan</button>
-            <button class="primary-btn" onclick="closeSession('${date}',${i+1})">Tutup & Kunci Sesi</button>
-          `:`<span class="pill good">✓ Sesi sudah dikunci</span>`}
-        </div>
-      </div>`;
-  }).join("");
-
-  renderDashboardSessions();
-}
-
-function openSessionSale(date,index){
-  const s=getSession(date,index);
-
-  if(s.locked)return toast("Sesi sudah dikunci.");
-
-  showModal("Input Penjualan Sesi",`
-    <div class="form-group">
-      <label>PILIH MENU</label>
-      <select id="saleMenu">
-        ${db.menus.map(m=>`<option value="${m.id}">${m.name}</option>`).join("")}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>JUMLAH TERJUAL</label>
-      <input type="number" id="saleQty" min="1" placeholder="Masukkan jumlah">
-    </div>
-    <div class="modal-actions">
-      <button class="secondary-btn" onclick="closeModal()">Batal</button>
-      <button class="primary-btn" onclick="saveSessionSale('${date}',${index})">Simpan</button>
-    </div>
-  `);
-}
-
-function saveSessionSale(date,index){
-  const id=document.getElementById("saleMenu").value;
-  const qty=Number(document.getElementById("saleQty").value);
-  const s=getSession(date,index);
-
-  if(!Number.isInteger(qty)||qty<1)return toast("Masukkan jumlah yang valid.");
-
-  const m=getMenu(id);
-  if(qty>remaining(m))return toast("Jumlah melebihi stok tersedia.");
-
-  s.items[id]=(s.items[id]||0)+qty;
-
-  addHistory("Penjualan Sesi",m.name,qty,`Sesi ${index} · ${date}`);
-  saveDB();
-  closeModal();
-  renderAll();
-  toast("Penjualan sesi berhasil disimpan.");
-}
-
-function closeSession(date,index){
-  const s=getSession(date,index);
-  const total=Object.values(s.items).reduce((a,b)=>a+b,0);
-
-  if(!confirm(`Kunci Sesi ${index}?\nTotal penjualan: ${total} item.\nData tidak bisa diubah setelah dikunci.`))return;
-
-  s.locked=true;
-  s.closedAt=new Date().toISOString();
-  saveDB();
-  renderAll();
-  toast("Sesi berhasil dikunci.");
-}
-
-/* =====================================
-   STOCK MANAGEMENT
-===================================== */
-
-function renderStock(){
-  const search=(document.getElementById("stockSearch")?.value||"").toLowerCase();
-
-  const menus=db.menus.filter(m=>m.name.toLowerCase().includes(search));
-
-  document.getElementById("stockTable").innerHTML=`
-    <table>
-      <thead><tr>
-        <th>MENU</th><th>STOK AWAL</th><th>RESERVASI</th>
-        <th>MANUAL</th><th>SESI</th><th>SISA STOK</th><th>AKSI</th>
-      </tr></thead>
-      <tbody>
-        ${menus.map(m=>{
-          const sold=sessionSold(m.id);
-          const left=remaining(m);
-          return `<tr>
-            <td><div class="product-name">${m.name}</div></td>
-            <td>${m.stock}</td>
-            <td>${m.reservation}</td>
-            <td>${m.manual}</td>
-            <td>${sold}</td>
-            <td><b>${left}</b> <span class="pill ${left<=0?"bad":left<=db.settings.lowLimit?"low":"good"}">${left<=0?"Habis":left<=db.settings.lowLimit?"Menipis":"Aman"}</span></td>
-            <td><div class="row-actions">
-              <button class="icon-btn" onclick="openEditStock('${m.id}')">Edit</button>
-              <button class="icon-btn" onclick="openManualSale('${m.id}')">Jual</button>
-              <button class="icon-btn" onclick="openReservation('${m.id}')">Reservasi</button>
-            </div></td>
-          </tr>`;
-        }).join("")}
-      </tbody>
-    </table>`;
-}
-
-function openEditStock(id){
-  const m=getMenu(id);
-  showModal("Edit Stok",`
-    <div class="form-group"><label>NAMA MENU</label><input value="${m.name}" disabled></div>
-    <div class="form-group"><label>STOK AWAL / PENAMBAHAN STOK</label><input type="number" id="stockValue" min="0" value="${m.stock}"></div>
-    <div class="modal-actions">
-      <button class="secondary-btn" onclick="closeModal()">Batal</button>
-      <button class="primary-btn" onclick="updateStock('${id}')">Simpan</button>
-    </div>`);
-}
-
-function updateStock(id){
-  const m=getMenu(id);
-  const value=Number(document.getElementById("stockValue").value);
-
-  if(!Number.isInteger(value)||value<0)return toast("Stok tidak valid.");
-
-  const diff=value-m.stock;
-  m.stock=value;
-
-  addHistory("Penyesuaian Stok",m.name,diff,"Perubahan stok awal");
-  saveDB();
-  closeModal();
-  renderAll();
-  toast("Stok diperbarui.");
-}
-
-function openStockModal(){
-  showModal("Tambah Menu",`
-    <div class="form-group"><label>NAMA MENU</label><input id="newName" placeholder="Nama menu"></div>
-    <div class="form-group"><label>STOK AWAL</label><input type="number" id="newStock" min="0" value="0"></div>
-    <div class="modal-actions">
-      <button class="secondary-btn" onclick="closeModal()">Batal</button>
-      <button class="primary-btn" onclick="addMenu()">Tambah</button>
-    </div>`);
-}
-
-function addMenu(){
-  const name=document.getElementById("newName").value.trim();
-  const stock=Number(document.getElementById("newStock").value);
-
-  if(!name||!Number.isInteger(stock)||stock<0)return toast("Periksa data menu.");
-
-  if(db.menus.some(m=>m.name.toLowerCase()===name.toLowerCase()))return toast("Menu sudah ada.");
-
-  const id="menu_"+Date.now();
-  db.menus.push({id,name,stock,reservation:0,manual:0});
-
-  addHistory("Menu Baru",name,stock,"Menu ditambahkan");
-  closeModal();
-  renderAll();
-  toast("Menu berhasil ditambahkan.");
-}
-
-function openReservation(id){
-  const m=getMenu(id);
-  showModal("Atur Reservasi",`
-    <div class="form-group"><label>${m.name}</label><input type="number" id="reservationValue" min="0" value="${m.reservation}"></div>
-    <div class="modal-actions">
-      <button class="secondary-btn" onclick="closeModal()">Batal</button>
-      <button class="primary-btn" onclick="updateReservation('${id}')">Simpan</button>
-    </div>`);
-}
-
-function updateReservation(id){
-  const m=getMenu(id);
-  const value=Number(document.getElementById("reservationValue").value);
-  const other=m.manual+sessionSold(id);
-
-  if(!Number.isInteger(value)||value<0||value+other>m.stock)return toast("Reservasi melebihi stok tersedia.");
-
-  const diff=value-m.reservation;
-  m.reservation=value;
-
-  addHistory("Perubahan Reservasi",m.name,diff,"Reservasi diperbarui");
-  saveDB();
-  closeModal();
-  renderAll();
-  toast("Reservasi diperbarui.");
-}
-
-function openManualSale(id){
-  const m=getMenu(id);
-  showModal("Penjualan Manual",`
-    <div class="form-group"><label>MENU</label><input value="${m.name}" disabled></div>
-    <div class="form-group"><label>JUMLAH TERJUAL</label><input type="number" id="manualQty" min="1" placeholder="Jumlah"></div>
-    <div class="modal-actions">
-      <button class="secondary-btn" onclick="closeModal()">Batal</button>
-      <button class="primary-btn" onclick="saveManualSale('${id}')">Simpan</button>
-    </div>`);
-}
-
-function saveManualSale(id){
-  const qty=Number(document.getElementById("manualQty").value);
-  const m=getMenu(id);
-
-  if(!Number.isInteger(qty)||qty<1||qty>remaining(m))return toast("Jumlah tidak valid atau stok tidak cukup.");
-
-  m.manual+=qty;
-  addHistory("Penjualan Manual",m.name,qty);
-  saveDB();
-  closeModal();
-  renderAll();
-  toast("Transaksi berhasil.");
-}
-
-/* =====================================
-   DASHBOARD
-===================================== */
-
+function fillMenuSelect(id){const el=$(id);if(!el)return;const old=el.value;el.innerHTML=db.menus.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');if(db.menus.some(m=>m.id===old))el.value=old;}
 function renderDashboard(){
-  document.getElementById("totalMenus").textContent=db.menus.length;
-
-  document.getElementById("totalStock").textContent=
-    db.menus.reduce((a,m)=>a+remaining(m),0);
-
-  document.getElementById("totalSold").textContent=totalSold();
-
-  document.getElementById("lowStock").textContent=
-    db.menus.filter(m=>remaining(m)<=db.settings.lowLimit).length;
-
-  document.getElementById("dashboardStock").innerHTML=`
-    <table><thead><tr><th>MENU</th><th>STOK TERSISA</th><th>STATUS</th></tr></thead>
-    <tbody>${db.menus.map(m=>{
-      const n=remaining(m);
-      return `<tr><td class="product-name">${m.name}</td><td>${n}</td>
-      <td><span class="pill ${n<=0?"bad":n<=db.settings.lowLimit?"low":"good"}">${n<=0?"Habis":n<=db.settings.lowLimit?"Menipis":"Aman"}</span></td></tr>`;
-    }).join("")}</tbody></table>`;
-
-  renderDashboardSessions();
-
-  document.getElementById("recentActivity").innerHTML=
-    db.history.slice(0,5).map(h=>`
-      <div class="history-row">
-        <span>${h.type} · ${h.menu}</span>
-        <b>${h.qty>0?"+":""}${h.qty}</b>
-        <span class="product-sub">${new Date(h.date).toLocaleString("id-ID")}</span>
-      </div>
-    `).join("")||'<div class="empty">Belum ada aktivitas.</div>';
+  $('statStock').textContent=db.menus.reduce((a,m)=>a+available(m),0);
+  $('statReservation').textContent=db.menus.reduce((a,m)=>a+Number(m.reservation||0),0);
+  $('statSold').textContent=soldToday();
+  $('statLow').textContent=db.menus.filter(m=>available(m)<=5).length;
+  $('dashboardTable').innerHTML=db.menus.length?db.menus.map(m=>`<tr><td>${esc(m.name)}</td><td>${m.stock}</td><td>${m.reservation}</td><td>${sessionSold(m.id)+m.manual}</td><td><strong>${available(m)}</strong></td><td>${statusHTML(available(m))}</td></tr>`).join(''):emptyRow(6);
 }
-
-function renderDashboardSessions(){
-  const el=document.getElementById("dashboardSessions");
-  if(!el)return;
-
-  const date=localDate();
-  const schedule=getSchedule(getDayType(date));
-
-  el.innerHTML=schedule.map((item,i)=>{
-    const s=getSession(date,i+1);
-    return `<div class="session-mini">
-      <div><b>${item.name}</b><div class="product-sub">${item.time}</div></div>
-      <span class="pill ${s.locked?"good":"low"}">${s.locked?"Selesai":"Terbuka"}</span>
-    </div>`;
-  }).join("");
+function renderStock(){
+  $('stockTable').innerHTML=db.menus.length?db.menus.map(m=>`<tr><td><strong>${esc(m.name)}</strong></td><td>${m.stock}</td><td>${m.reservation}</td><td>${sessionSold(m.id)+m.manual}</td><td>${available(m)} ${statusHTML(available(m))}</td><td><button class="btn ghost" data-stock-edit="${m.id}">Ubah stok</button> <button class="btn ghost" data-stock-add="${m.id}">＋ Stok</button></td></tr>`).join(''):emptyRow(6);
+  fillMenuSelect('manualMenu');fillMenuSelect('reservationMenu');fillMenuSelect('sessionMenu');fillMenuSelect('auditMenu');
 }
-
-/* =====================================
-   STOCK AUDIT
-===================================== */
-
-function renderAudit(){
-  document.getElementById("auditTable").innerHTML=`
-    <table><thead><tr><th>MENU</th><th>STOK SISTEM</th><th>STOK FISIK</th></tr></thead>
-    <tbody>${db.menus.map(m=>`
-      <tr>
-        <td>${m.name}</td>
-        <td>${remaining(m)}</td>
-        <td><input class="audit-input" type="number" min="0" id="audit_${m.id}" placeholder="Qty"></td>
-      </tr>`).join("")}</tbody></table>`;
+function renderReservations(){
+  $('reservationTable').innerHTML=db.reservations.length?db.reservations.map(r=>`<tr><td>${esc(r.time)}</td><td>${esc(r.menuName)}</td><td>${r.qty}</td><td>${esc(r.note)}</td><td><button class="btn ghost" data-res-cancel="${r.id}">Batalkan</button></td></tr>`).join(''):emptyRow(5);
 }
-
-function saveAudit(){
-  const results=[];
-
-  for(const m of db.menus){
-    const input=document.getElementById("audit_"+m.id);
-    if(input.value==="")return toast("Isi seluruh jumlah stok fisik.");
-
-    const physical=Number(input.value);
-    if(!Number.isInteger(physical)||physical<0)return toast("Jumlah fisik tidak valid.");
-
-    const system=remaining(m);
-    results.push({menu:m.name,system,physical,difference:physical-system});
-  }
-
-  db.audits.unshift({date:new Date().toISOString(),results});
-  saveDB();
-
-  document.getElementById("auditResult").innerHTML=`
-    <div class="notice" style="margin:20px 0 0">
-      <b>Hasil Pemeriksaan</b><br><br>
-      ${results.map(r=>`${r.menu}: ${r.difference===0?"Sesuai":`Selisih ${r.difference>0?"+":""}${r.difference}`}`).join("<br>")}
-      <br><br>Data stok belum diubah. Lakukan pemeriksaan dan penyesuaian secara manual jika diperlukan.
-    </div>`;
-
-  toast("Hasil audit disimpan.");
+function renderSessions(){
+  const sessions=daySessions();$('dayType').textContent=sessions.length===3?'Akhir pekan':'Hari kerja';
+  $('sessionCards').innerHTML=sessions.map(s=>{const x=getSession(today(),s.id);const total=Object.values(x.sales||{}).reduce((a,b)=>a+b,0);return `<article class="session-card"><h3>${s.name}</h3><p>${s.time}</p><strong>${total} <small>unit terjual</small></strong><p>${x.closed?'Sesi sudah dikunci':'Sesi masih terbuka'}</p><button class="btn ${x.closed?'ghost':'primary'}" data-session-close="${s.id}" ${x.closed?'disabled':''}>${x.closed?'Terkunci':'Tutup & Kunci Sesi'}</button></article>`}).join('');
+  $('sessionSelect').innerHTML=sessions.map(s=>`<option value="${s.id}">${s.name} (${s.time})</option>`).join('');
 }
-
-/* =====================================
-   HISTORY & REPORTS
-===================================== */
-
 function renderHistory(){
-  document.getElementById("historyTable").innerHTML=`
-    <table><thead><tr><th>WAKTU</th><th>AKTIVITAS</th><th>MENU</th><th>JUMLAH</th><th>KETERANGAN</th></tr></thead>
-    <tbody>${db.history.map(h=>`
-      <tr>
-        <td>${new Date(h.date).toLocaleString("id-ID")}</td>
-        <td>${h.type}</td><td>${h.menu}</td>
-        <td>${h.qty>0?"+":""}${h.qty}</td>
-        <td>${h.detail||"-"}</td>
-      </tr>`).join("")}</tbody></table>
-    ${db.history.length?"":'<div class="empty">Belum ada riwayat.</div>'}`;
+  $('historyTable').innerHTML=db.history.length?db.history.slice(0,200).map(h=>`<tr><td>${esc(h.time)}</td><td>${esc(h.action)}</td><td>${esc(h.menu)}</td><td>${h.qty}</td><td>${esc(h.note)}</td></tr>`).join(''):emptyRow(5);
 }
-
+function renderAudit(){
+  $('auditResults').innerHTML=db.audits.length?db.audits.slice(0,20).map(a=>`<div class="audit-result"><span><strong>${esc(a.menu)}</strong><br><span class="muted">${esc(a.time)} · Sistem ${a.system} / Fisik ${a.physical}</span></span><strong class="${a.diff===0?'good':'orange'}">${a.diff===0?'Sesuai':(a.diff>0?'Lebih ':'Kurang ')+Math.abs(a.diff)}</strong></div>`).join(''):'<p class="muted">Belum ada audit.</p>';
+}
 function renderReports(){
-  const reservation=db.menus.reduce((a,m)=>a+m.reservation,0);
-  const sales=totalSold();
-  const stock=db.menus.reduce((a,m)=>a+remaining(m),0);
-
-  document.getElementById("reportReservation").textContent=reservation;
-  document.getElementById("reportSales").textContent=sales;
-  document.getElementById("reportRemaining").textContent=stock;
-
-  document.getElementById("reportTable").innerHTML=`
-    <table><thead><tr><th>MENU</th><th>STOK AWAL</th><th>RESERVASI</th><th>TERJUAL</th><th>SISA</th></tr></thead>
-    <tbody>${db.menus.map(m=>`
-      <tr><td>${m.name}</td><td>${m.stock}</td><td>${m.reservation}</td>
-      <td>${m.manual+sessionSold(m.id)}</td><td><b>${remaining(m)}</b></td></tr>
-    `).join("")}</tbody></table>`;
+  $('reportMenus').textContent=db.menus.length;$('reportOpening').textContent=db.menus.reduce((a,m)=>a+m.stock,0);$('reportAvailable').textContent=db.menus.reduce((a,m)=>a+available(m),0);$('reportActivity').textContent=db.history.length;
+  $('reportTable').innerHTML=db.menus.map(m=>`<tr><td>${esc(m.name)}</td><td>${m.stock}</td><td>${m.reservation}</td><td>${m.manual+sessionSold(m.id)}</td><td>${available(m)}</td></tr>`).join('')||emptyRow(5);
 }
-
-function exportCSV(){
-  const rows=[
-    ["Menu","Stok Awal","Reservasi","Manual","Penjualan Sesi","Sisa Stok"],
-    ...db.menus.map(m=>[
-      m.name,m.stock,m.reservation,m.manual,sessionSold(m.id),remaining(m)
-    ])
-  ];
-
-  const csv=rows.map(row=>row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-  downloadFile("\uFEFF"+csv,"stock-report.csv","text/csv");
-  toast("Laporan berhasil diekspor.");
+function renderAll(){renderDashboard();renderStock();renderReservations();renderSessions();renderHistory();renderAudit();renderReports();}
+function openModal(title,fields,onSave){
+  $('modalTitle').textContent=title;$('modalFields').innerHTML=fields;$('modalBackdrop').classList.add('show');
+  $('modalForm').onsubmit=e=>{e.preventDefault();const result=onSave(new FormData(e.currentTarget));if(result!==false){closeModal();renderAll();}};
 }
+function closeModal(){$('modalBackdrop').classList.remove('show');$('modalForm').onsubmit=null;}
+$('modalClose').addEventListener('click',closeModal);$('modalCancel').addEventListener('click',closeModal);
+$('modalBackdrop').addEventListener('click',e=>{if(e.target===$('modalBackdrop'))closeModal();});
+$('addMenuBtn').addEventListener('click',()=>openModal('Tambah Menu',`<div class="modal-fields"><label>Nama menu<input name="name" required maxlength="60"></label><label>Stok awal<input name="stock" type="number" min="0" required value="0"></label></div>`,f=>{const name=f.get('name').trim();if(db.menus.some(m=>m.name.toLowerCase()===name.toLowerCase())){toast('Menu sudah ada.');return false;}db.menus.push({id:uid(),name,stock:Number(f.get('stock')),reservation:0,manual:0});log('Tambah menu',name,Number(f.get('stock')));toast('Menu berhasil ditambahkan.');}));
+$('stockTable').addEventListener('click',e=>{const edit=e.target.closest('[data-stock-edit]');const add=e.target.closest('[data-stock-add]');if(edit){const m=getMenu(edit.dataset.stockEdit);openModal('Ubah Stok Awal',`<div class="modal-fields"><label>Menu<input value="${esc(m.name)}" disabled></label><label>Stok awal<input name="stock" type="number" min="0" required value="${m.stock}"></label></div>`,f=>{const n=Number(f.get('stock'));if(n<m.reservation+m.manual+sessionSold(m.id)){toast('Stok tidak boleh lebih kecil dari jumlah yang sudah dialokasikan/terjual.');return false;}m.stock=n;log('Ubah stok awal',m.name,n);toast('Stok diperbarui.');});}if(add){const m=getMenu(add.dataset.stockAdd);openModal('Tambah Stok',`<div class="modal-fields"><label>Menu<input value="${esc(m.name)}" disabled></label><label>Jumlah tambahan<input name="qty" type="number" min="1" required></label></div>`,f=>{const q=Number(f.get('qty'));m.stock+=q;log('Penambahan stok',m.name,q);toast('Stok berhasil ditambahkan.');});}});
+$('manualForm').addEventListener('submit',e=>{e.preventDefault();const m=getMenu($('manualMenu').value),q=Number($('manualQty').value);if(!m||q<1)return;if(q>available(m)){toast('Jumlah melebihi stok tersedia.');return;}m.manual+=q;db.history.unshift({id:uid(),time:nowText(),date:today(),action:'Penjualan manual',menu:m.name,menuId:m.id,qty:q,note:'Penjualan manual'});saveDB();e.target.reset();renderAll();toast('Penjualan tersimpan.');});
+$('reservationForm').addEventListener('submit',e=>{e.preventDefault();const m=getMenu($('reservationMenu').value),q=Number($('reservationQty').value);if(!m||q<1)return;if(q>available(m)){toast('Jumlah reservasi melebihi stok tersedia.');return;}m.reservation+=q;db.reservations.unshift({id:uid(),time:nowText(),menuId:m.id,menuName:m.name,qty:q,note:$('reservationNote').value});log('Reservasi',m.name,q,$('reservationNote').value);e.target.reset();renderAll();toast('Reservasi tersimpan.');});
+$('reservationTable').addEventListener('click',e=>{const b=e.target.closest('[data-res-cancel]');if(!b)return;const i=db.reservations.findIndex(r=>r.id===b.dataset.resCancel);if(i<0)return;const r=db.reservations.splice(i,1)[0],m=getMenu(r.menuId);if(m)m.reservation=Math.max(0,m.reservation-r.qty);log('Pembatalan reservasi',r.menuName,r.qty,r.note);renderAll();toast('Reservasi dibatalkan.');});
+$('sessionForm').addEventListener('submit',e=>{e.preventDefault();const sid=$('sessionSelect').value,m=getMenu($('sessionMenu').value),q=Number($('sessionQty').value),s=getSession(today(),sid);if(!m||q<1)return;if(s.closed){toast('Sesi sudah dikunci.');return;}if(q>available(m)){toast('Jumlah melebihi stok tersedia.');return;}s.sales[m.id]=(s.sales[m.id]||0)+q;db.sessions[sessionKey(today(),sid)]=s;db.history.unshift({id:uid(),time:nowText(),date:today(),action:'Penjualan sesi',menu:m.name,menuId:m.id,qty:q,note:$('sessionSelect').selectedOptions[0].textContent});saveDB();e.target.reset();renderAll();toast('Penjualan sesi tersimpan.');});
+$('sessionCards').addEventListener('click',e=>{const b=e.target.closest('[data-session-close]');if(!b)return;const sid=b.dataset.sessionClose,s=getSession(today(),sid);if(s.closed)return;if(!confirm('Tutup dan kunci sesi ini? Setelah ditutup, data penjualan sesi tidak dapat diubah.'))return;s.closed=true;s.closedAt=nowText();db.sessions[sessionKey(today(),sid)]=s;log('Sesi dikunci',sid,0,'Sesi ditutup permanen');renderAll();toast('Sesi berhasil dikunci.');});
+$('auditForm').addEventListener('submit',e=>{e.preventDefault();const m=getMenu($('auditMenu').value),physical=Number($('physicalQty').value);if(!m||physical<0)return;const system=available(m),a={id:uid(),time:nowText(),menu:m.name,system,physical,diff:physical-system,note:$('auditNote').value};db.audits.unshift(a);log('Audit stok',m.name,physical,`Sistem ${system}; fisik ${physical}; selisih ${a.diff}`);e.target.reset();renderAll();toast(a.diff===0?'Stok sesuai.':'Ditemukan selisih stok.');});
+$('receiptFile').addEventListener('change',()=>{$('receiptName').textContent=$('receiptFile').files[0]?.name||'';toast('Foto dipilih. AI scanner belum dihubungkan.');});
+$('clearHistoryBtn').addEventListener('click',()=>{if(!confirm('Hapus seluruh riwayat transaksi? Data stok tidak berubah.'))return;db.history=[];saveDB();renderAll();toast('Riwayat dihapus.');});
+$('exportCsvBtn').addEventListener('click',()=>{const rows=[['Menu','Stok Awal','Reservasi','Terjual','Tersedia'],...db.menus.map(m=>[m.name,m.stock,m.reservation,m.manual+sessionSold(m.id),available(m)])];const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');download('laporan-stok.csv',csv,'text/csv');});
+function download(name,content,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
+$('backupBtn').addEventListener('click',()=>download('stock-app-ai-backup-'+today()+'.json',JSON.stringify(db,null,2),'application/json'));
+$('restoreFile').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{const parsed=JSON.parse(await file.text());if(!parsed||!Array.isArray(parsed.menus)||!parsed.sessions||!Array.isArray(parsed.history))throw new Error('Format backup tidak valid');if(!confirm('Pulihkan backup? Data saat ini akan diganti.'))return;db=parsed;saveDB();renderAll();toast('Backup berhasil dipulihkan.');}catch(err){toast('File backup tidak valid.');}finally{e.target.value='';}});
+$('resetBtn').addEventListener('click',()=>{if(!confirm('Yakin reset semua data? Tindakan ini tidak bisa dibatalkan. Unduh backup terlebih dahulu jika diperlukan.'))return;db=freshDB();saveDB();renderAll();toast('Aplikasi berhasil direset.');});
 
-/* =====================================
-   BACKUP & RESTORE
-===================================== */
-
-function downloadFile(content,name,type){
-  const blob=new Blob([content],{type});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url;a.download=name;a.click();
-  URL.revokeObjectURL(url);
-}
-
-function backupData(){
-  downloadFile(JSON.stringify(db,null,2),"stock-app-backup.json","application/json");
-  toast("Backup berhasil dibuat.");
-}
-
-function restoreData(){
-  const file=document.getElementById("restoreFile").files[0];
-  if(!file)return toast("Pilih file backup terlebih dahulu.");
-
-  const reader=new FileReader();
-
-  reader.onload=()=>{
-    try{
-      const data=JSON.parse(reader.result);
-
-      if(!Array.isArray(data.menus)||!data.sessions||!Array.isArray(data.history))
-        throw new Error("Format tidak valid");
-
-      if(!confirm("Pulihkan backup? Data saat ini akan diganti."))return;
-
-      db=data;
-      saveDB();
-      renderAll();
-      toast("Data berhasil dipulihkan.");
-    }catch(e){
-      toast("File backup tidak valid.");
-    }
-  };
-
-  reader.readAsText(file);
-}
-
-function saveSettings(){
-  const value=Number(document.getElementById("lowLimit").value);
-  if(!Number.isInteger(value)||value<0)return toast("Batas stok tidak valid.");
-
-  db.settings.lowLimit=value;
-  saveDB();
-  renderAll();
-  toast("Pengaturan disimpan.");
-}
-
-function resetApp(){
-  if(!confirm("Hapus seluruh data Stock App?"))return;
-  if(!confirm("Konfirmasi terakhir: seluruh stok dan riwayat akan hilang."))return;
-
-  localStorage.removeItem(DB_KEY);
-  db=loadDB();
-  renderAll();
-  toast("Aplikasi berhasil direset.");
-}
-
-/* =====================================
-   MODAL
-===================================== */
-
-function showModal(title,content){
-  document.getElementById("modalTitle").textContent=title;
-  document.getElementById("modalBody").innerHTML=content;
-  document.getElementById("modal").classList.add("show");
-}
-
-function closeModal(){
-  document.getElementById("modal").classList.remove("show");
-}
-
-document.getElementById("modal").addEventListener("click",e=>{
-  if(e.target.id==="modal")closeModal();
-});
-
-/* =====================================
-   RENDER ALL
-===================================== */
-
-function renderAll(){
-  renderDashboard();
-  renderStock();
-  renderSession
+$('todayLabel').textContent=new Date().toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+saveDB();renderAll();
