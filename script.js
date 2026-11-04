@@ -7,6 +7,7 @@ const filesBox=document.querySelector("#files");
 const newBtn=document.querySelector("#new");
 
 let files=[];
+let pendingAction=null;
 
 // =================================
 // DATA STOK
@@ -146,8 +147,23 @@ ${s.opening} - ${s.reservation} - ${s.manual} - ${s.session} = ${s.remaining}
 Stok akhir: ${s.remaining} pcs`;
 }
 
+function getAllStock(){
+  let report="RINGKASAN STOK NEX AI\n\n";
+  let total=0;
+
+  Object.keys(openingStock).forEach(menu=>{
+    const s=getStock(menu);
+    report+=`${menu}: ${s.remaining} pcs\n`;
+    total+=s.remaining;
+  });
+
+  report+=`\nTotal seluruh stok: ${total} pcs`;
+
+  return report;
+}
+
 // =================================
-// TRANSAKSI
+// TRANSAKSI BARU
 // =================================
 
 function parseTransaction(text){
@@ -231,16 +247,11 @@ function parseTransaction(text){
   const updated=getStock(menu);
 
   return{
-    reply:`Transaksi berhasil disimpan secara lokal.
+    reply:`Transaksi berhasil disimpan.
 
 Jenis: ${typeName[type]}
 Menu: ${menu}
 Jumlah: ${quantity} pcs
-
-Stok awal: ${updated.opening}
-Total Reservation: ${updated.reservation}
-Total Manual Sales: ${updated.manual}
-Total Session Sales: ${updated.session}
 
 Stok tersisa: ${updated.remaining} pcs
 
@@ -252,20 +263,16 @@ Data tersimpan di browser ini.`
 // RIWAYAT TRANSAKSI
 // =================================
 
-function getTransactionHistory(text){
-  const lower=text.toLowerCase();
-
+function getHistoryEntries(text=""){
   let history=[...stockData.transactions];
 
   const menu=findMenu(text);
 
   if(menu){
-    history=history.filter(
-      t=>t.menu===menu
-    );
+    history=history.filter(t=>t.menu===menu);
   }
 
-  const sessionMatch=lower.match(/sesi\s*(\d+)/);
+  const sessionMatch=text.match(/sesi\s*(\d+)/i);
 
   if(sessionMatch){
     const session="Sesi "+sessionMatch[1];
@@ -278,6 +285,12 @@ function getTransactionHistory(text){
   history.sort(
     (a,b)=>new Date(b.date)-new Date(a.date)
   );
+
+  return history;
+}
+
+function getTransactionHistory(text){
+  const history=getHistoryEntries(text);
 
   if(!history.length){
     return"Belum ada transaksi yang ditemukan.";
@@ -314,24 +327,183 @@ function getTransactionHistory(text){
 }
 
 // =================================
-// SEMUA STOK
+// EDIT DAN HAPUS
 // =================================
 
-function getAllStock(){
-  let report="RINGKASAN STOK NEX AI\n\n";
+function requestDelete(text){
+  const match=text.match(
+    /^hapus\s+transaksi\s+(\d+)$/i
+  );
 
-  let total=0;
+  if(!match)return null;
 
-  Object.keys(openingStock).forEach(menu=>{
-    const s=getStock(menu);
+  const number=Number(match[1]);
+  const history=getHistoryEntries();
 
-    report+=`${menu}: ${s.remaining} pcs\n`;
-    total+=s.remaining;
-  });
+  const transaction=history[number-1];
 
-  report+=`\nTotal seluruh stok: ${total} pcs`;
+  if(!transaction){
+    return"Nomor transaksi tidak ditemukan. Periksa riwayat transaksi terlebih dahulu.";
+  }
 
-  return report;
+  pendingAction={
+    type:"delete",
+    id:transaction.id
+  };
+
+  return `KONFIRMASI HAPUS TRANSAKSI
+
+Menu: ${transaction.menu}
+Jenis: ${transaction.type}
+Jumlah: ${transaction.quantity} pcs
+
+Apakah kamu yakin ingin menghapus transaksi nomor ${number}?
+
+Ketik:
+KONFIRMASI HAPUS
+
+Atau ketik:
+BATAL`;
+}
+
+function requestEdit(text){
+  const match=text.match(
+    /^ubah\s+transaksi\s+(\d+)\s+(?:menjadi|ke)\s+(\d+)$/i
+  );
+
+  if(!match)return null;
+
+  const number=Number(match[1]);
+  const newQuantity=Number(match[2]);
+  const history=getHistoryEntries();
+
+  const transaction=history[number-1];
+
+  if(!transaction){
+    return"Nomor transaksi tidak ditemukan. Periksa riwayat transaksi terlebih dahulu.";
+  }
+
+  if(!Number.isSafeInteger(newQuantity)||newQuantity<=0){
+    return"Jumlah baru harus berupa angka positif.";
+  }
+
+  const current=getStock(transaction.menu);
+
+  const available=current.remaining+transaction.quantity;
+
+  if(newQuantity>available){
+    return`Perubahan ditolak. Jumlah maksimal yang dapat dimasukkan adalah ${available} pcs.`;
+  }
+
+  pendingAction={
+    type:"edit",
+    id:transaction.id,
+    newQuantity
+  };
+
+  return `KONFIRMASI EDIT TRANSAKSI
+
+Menu: ${transaction.menu}
+Jumlah sebelumnya: ${transaction.quantity} pcs
+Jumlah baru: ${newQuantity} pcs
+
+Apakah kamu yakin ingin mengubah transaksi ini?
+
+Ketik:
+KONFIRMASI UBAH
+
+Atau ketik:
+BATAL`;
+}
+
+function confirmAction(text){
+  const command=text.trim().toLowerCase();
+
+  if(!pendingAction)return null;
+
+  if(command==="batal"){
+    pendingAction=null;
+    return"Perubahan dibatalkan. Data transaksi tetap seperti sebelumnya.";
+  }
+
+  if(command==="konfirmasi hapus"){
+    if(pendingAction.type!=="delete"){
+      return"Perintah konfirmasi tidak sesuai. Ketik BATAL atau gunakan konfirmasi yang diminta.";
+    }
+
+    const index=stockData.transactions.findIndex(
+      t=>t.id===pendingAction.id
+    );
+
+    if(index===-1){
+      pendingAction=null;
+      return"Transaksi tidak ditemukan. Tidak ada perubahan.";
+    }
+
+    const deleted=stockData.transactions.splice(index,1)[0];
+
+    saveStock();
+    pendingAction=null;
+
+    const updated=getStock(deleted.menu);
+
+    return `TRANSAKSI BERHASIL DIHAPUS
+
+Menu: ${deleted.menu}
+Jumlah transaksi: ${deleted.quantity} pcs
+
+Stok sekarang: ${updated.remaining} pcs
+
+Stok telah dihitung ulang.`;
+  }
+
+  if(command==="konfirmasi ubah"){
+    if(pendingAction.type!=="edit"){
+      return"Perintah konfirmasi tidak sesuai. Ketik BATAL atau gunakan konfirmasi yang diminta.";
+    }
+
+    const transaction=stockData.transactions.find(
+      t=>t.id===pendingAction.id
+    );
+
+    if(!transaction){
+      pendingAction=null;
+      return"Transaksi tidak ditemukan. Tidak ada perubahan.";
+    }
+
+    const oldQuantity=transaction.quantity;
+    const newQuantity=pendingAction.newQuantity;
+
+    const available=getStock(transaction.menu).remaining+oldQuantity;
+
+    if(newQuantity>available){
+      pendingAction=null;
+      return`Perubahan ditolak. Stok tidak mencukupi. Maksimal ${available} pcs.`;
+    }
+
+    transaction.quantity=newQuantity;
+
+    saveStock();
+    pendingAction=null;
+
+    const updated=getStock(transaction.menu);
+
+    return `TRANSAKSI BERHASIL DIUBAH
+
+Menu: ${transaction.menu}
+Jumlah sebelumnya: ${oldQuantity} pcs
+Jumlah sekarang: ${newQuantity} pcs
+
+Stok terbaru: ${updated.remaining} pcs
+
+Stok telah dihitung ulang.`;
+  }
+
+  if(command.startsWith("konfirmasi")){
+    return"Konfirmasi tidak dikenali. Ikuti perintah konfirmasi yang ditampilkan atau ketik BATAL.";
+  }
+
+  return null;
 }
 
 // =================================
@@ -453,7 +625,37 @@ form.onsubmit=async e=>{
   files=[];
   render();
 
-  // TRANSAKSI
+  // KONFIRMASI TERTUNDA
+  if(text&&pendingAction){
+    const result=confirmAction(text);
+
+    if(result){
+      add(result,"ai");
+      return;
+    }
+  }
+
+  // HAPUS TRANSAKSI
+  if(text){
+    const result=requestDelete(text);
+
+    if(result){
+      add(result,"ai");
+      return;
+    }
+  }
+
+  // EDIT TRANSAKSI
+  if(text){
+    const result=requestEdit(text);
+
+    if(result){
+      add(result,"ai");
+      return;
+    }
+  }
+
+  // TRANSAKSI BARU
   if(text){
     const transaction=parseTransaction(text);
 
@@ -558,6 +760,8 @@ form.onsubmit=async e=>{
 // =================================
 
 newBtn.onclick=()=>{
+  pendingAction=null;
+
   chat.innerHTML=`
     <section class="welcome">
       <strong>NEX</strong>
