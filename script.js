@@ -9,7 +9,7 @@ const newBtn=document.querySelector("#new");
 let files=[];
 
 // =================================
-// DATA STOK NEX AI
+// DATA STOK
 // =================================
 
 const STORAGE_KEY="nex_stock_data_v1";
@@ -28,7 +28,6 @@ const aliases={
   "tempura shrimp":"Prawn Mayo",
   "tempura shrimps":"Prawn Mayo",
   "tempura shrimp mayo":"Prawn Mayo",
-  "tempura shrimp mayo":"Prawn Mayo",
   "prown mayo":"Prawn Mayo",
   "perown mayo":"Prawn Mayo",
   "prawn maywo":"Prawn Mayo",
@@ -46,15 +45,21 @@ const aliases={
   "mix platter":"Mix Platters"
 };
 
+// =================================
+// LOCAL STORAGE
+// =================================
+
 function loadStock(){
   try{
-    const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const saved=JSON.parse(
+      localStorage.getItem(STORAGE_KEY)
+    );
 
     if(saved&&Array.isArray(saved.transactions)){
       return saved;
     }
   }catch(e){
-    console.error("Gagal membaca data stok:",e);
+    console.error(e);
   }
 
   return {transactions:[]};
@@ -69,16 +74,18 @@ function saveStock(){
   );
 }
 
+// =================================
+// MENU
+// =================================
+
 function normalizeMenu(name){
   const value=name.trim().toLowerCase();
 
   if(aliases[value])return aliases[value];
 
-  const match=Object.keys(openingStock).find(
+  return Object.keys(openingStock).find(
     menu=>menu.toLowerCase()===value
-  );
-
-  return match||null;
+  )||null;
 }
 
 function findMenu(text){
@@ -99,7 +106,7 @@ function findMenu(text){
 }
 
 // =================================
-// MESIN PERHITUNGAN STOK
+// MESIN STOK
 // =================================
 
 function getSales(menu,type){
@@ -109,13 +116,12 @@ function getSales(menu,type){
 }
 
 function getStock(menu){
+  const opening=openingStock[menu];
   const reservation=getSales(menu,"reservation");
   const manual=getSales(menu,"manual");
   const session=getSales(menu,"session");
 
-  const opening=openingStock[menu];
-
-  return {
+  return{
     opening,
     reservation,
     manual,
@@ -141,7 +147,7 @@ Stok akhir: ${s.remaining} pcs`;
 }
 
 // =================================
-// MEMBACA PERINTAH TRANSAKSI
+// TRANSAKSI
 // =================================
 
 function parseTransaction(text){
@@ -190,15 +196,17 @@ function parseTransaction(text){
 
   const menu=normalizeMenu(menuText);
 
-  if(!menu||quantity<=0)return {
-    error:"Nama menu tidak dikenal atau jumlah tidak valid."
-  };
+  if(!menu||!Number.isSafeInteger(quantity)||quantity<=0){
+    return{
+      error:"Nama menu tidak dikenal atau jumlah tidak valid."
+    };
+  }
 
   const current=getStock(menu);
 
   if(quantity>current.remaining){
-    return {
-      error:`Transaksi ditolak. Stok ${menu} saat ini hanya ${current.remaining} pcs.`
+    return{
+      error:`Transaksi ditolak. Stok ${menu} hanya ${current.remaining} pcs.`
     };
   }
 
@@ -222,8 +230,7 @@ function parseTransaction(text){
 
   const updated=getStock(menu);
 
-  return {
-    transaction,
+  return{
     reply:`Transaksi berhasil disimpan secara lokal.
 
 Jenis: ${typeName[type]}
@@ -242,7 +249,93 @@ Data tersimpan di browser ini.`
 }
 
 // =================================
-// MENAMPILKAN CHAT
+// RIWAYAT TRANSAKSI
+// =================================
+
+function getTransactionHistory(text){
+  const lower=text.toLowerCase();
+
+  let history=[...stockData.transactions];
+
+  const menu=findMenu(text);
+
+  if(menu){
+    history=history.filter(
+      t=>t.menu===menu
+    );
+  }
+
+  const sessionMatch=lower.match(/sesi\s*(\d+)/);
+
+  if(sessionMatch){
+    const session="Sesi "+sessionMatch[1];
+
+    history=history.filter(
+      t=>t.type==="session"&&t.session===session
+    );
+  }
+
+  history.sort(
+    (a,b)=>new Date(b.date)-new Date(a.date)
+  );
+
+  if(!history.length){
+    return"Belum ada transaksi yang ditemukan.";
+  }
+
+  let report="RIWAYAT TRANSAKSI NEX AI\n\n";
+
+  history.forEach((t,i)=>{
+    const date=new Date(t.date).toLocaleString("id-ID",{
+      dateStyle:"medium",
+      timeStyle:"short"
+    });
+
+    const type={
+      reservation:"Reservation",
+      manual:"Manual Sales",
+      session:"Session Sales - "+t.session
+    }[t.type]||t.type;
+
+    report+=`${i+1}. ${t.menu}\n`;
+    report+=`Jenis: ${type}\n`;
+    report+=`Jumlah: ${t.quantity} pcs\n`;
+    report+=`Tanggal: ${date}\n\n`;
+  });
+
+  const total=history.reduce(
+    (sum,t)=>sum+t.quantity,0
+  );
+
+  report+=`Total transaksi: ${history.length}\n`;
+  report+=`Total jumlah tercatat: ${total} pcs`;
+
+  return report;
+}
+
+// =================================
+// SEMUA STOK
+// =================================
+
+function getAllStock(){
+  let report="RINGKASAN STOK NEX AI\n\n";
+
+  let total=0;
+
+  Object.keys(openingStock).forEach(menu=>{
+    const s=getStock(menu);
+
+    report+=`${menu}: ${s.remaining} pcs\n`;
+    total+=s.remaining;
+  });
+
+  report+=`\nTotal seluruh stok: ${total} pcs`;
+
+  return report;
+}
+
+// =================================
+// CHAT
 // =================================
 
 function add(text,type,fs=[]){
@@ -284,7 +377,7 @@ function removeTyping(){
 }
 
 // =================================
-// FILE UPLOAD
+// FILE
 // =================================
 
 function render(){
@@ -360,7 +453,7 @@ form.onsubmit=async e=>{
   files=[];
   render();
 
-  // TRANSAKSI LOKAL
+  // TRANSAKSI
   if(text){
     const transaction=parseTransaction(text);
 
@@ -373,7 +466,26 @@ form.onsubmit=async e=>{
     }
   }
 
-  // PERTANYAAN STOK
+  // RIWAYAT
+  if(
+    text&&
+    /riwayat|history|transaksi terakhir/i.test(text)
+  ){
+    add(getTransactionHistory(text),"ai");
+    return;
+  }
+
+  // SEMUA STOK
+  if(
+    text&&
+    /stok|persediaan/i.test(text)&&
+    /semua|seluruh|total/i.test(text)
+  ){
+    add(getAllStock(),"ai");
+    return;
+  }
+
+  // STOK MENU
   if(text&&/stok|persediaan/i.test(text)){
     const menu=findMenu(text);
 
@@ -381,21 +493,9 @@ form.onsubmit=async e=>{
       add(getStockReport(menu),"ai");
       return;
     }
-
-    if(/semua|seluruh|total/i.test(text)){
-      let report="RINGKASAN STOK NEX AI\n\n";
-
-      Object.keys(openingStock).forEach(menu=>{
-        const s=getStock(menu);
-        report+=`${menu}: ${s.remaining} pcs\n`;
-      });
-
-      add(report,"ai");
-      return;
-    }
   }
 
-  // GEMINI AI
+  // GEMINI
   typing();
 
   try{
@@ -405,14 +505,10 @@ form.onsubmit=async e=>{
       converted.push(await fileToBase64(file));
     }
 
-    const localContext=Object.keys(openingStock).map(menu=>{
-      const s=getStock(menu);
-
-      return {
-        menu,
-        ...s
-      };
-    });
+    const localContext=Object.keys(openingStock).map(menu=>({
+      menu,
+      ...getStock(menu)
+    }));
 
     const response=await fetch("/api/chat",{
       method:"POST",
