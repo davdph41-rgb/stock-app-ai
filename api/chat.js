@@ -1,107 +1,117 @@
-export default async function handler(req,res){
-  if(req.method!=="POST"){
-    return res.status(405).json({error:"Method not allowed"});
+const PRIMARY_MODEL    = "gemini-3.5-flash";
+const FALLBACK_MODEL   = "gemini-3.5-flash-lite";
+const RETRIABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const API_BASE         = "https://generativelanguage.googleapis.com/v1beta/models";
+
+async function callGemini(model, apiKey, body) {
+  return fetch(`${API_BASE}/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  try{
-    const apiKey=process.env.GEMINI_API_KEY;
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    if(!apiKey){
+    if (!apiKey) {
       return res.status(500).json({
-        error:"GEMINI_API_KEY belum tersedia di Vercel"
+        error: "GEMINI_API_KEY belum tersedia di Vercel",
       });
     }
 
-    const {message="",files=[]}=req.body||{};
+    const { message = "", files = [] } = req.body || {};
 
     // ==============================
     // DATA DASAR NEX AI
     // ==============================
 
-    const stockData={
-      menus:[
+    const stockData = {
+      menus: [
         "French Fries",
         "Chicken Wings",
         "Prawn Mayo",
         "Mekencis",
         "Beef Burger",
         "Fish & Chips",
-        "Mix Platters"
+        "Mix Platters",
       ],
 
-      aliases:{
-        "Tempura Shrimp":"Prawn Mayo",
-        "Tempura Shrimps":"Prawn Mayo",
-        "Tempura Shrimp Mayo":"Prawn Mayo",
-        "Prown Mayo":"Prawn Mayo",
-        "Perown Mayo":"Prawn Mayo",
-        "Prawn Maywo":"Prawn Mayo",
-        "Prawn Mayonaise":"Prawn Mayo",
+      aliases: {
+        "Tempura Shrimp": "Prawn Mayo",
+        "Tempura Shrimps": "Prawn Mayo",
+        "Tempura Shrimp Mayo": "Prawn Mayo",
+        "Prown Mayo": "Prawn Mayo",
+        "Perown Mayo": "Prawn Mayo",
+        "Prawn Maywo": "Prawn Mayo",
+        "Prawn Mayonaise": "Prawn Mayo",
 
-        "Fish n Chips":"Fish & Chips",
-        "Fish and Chips":"Fish & Chips",
-        "Fish Chips":"Fish & Chips",
+        "Fish n Chips": "Fish & Chips",
+        "Fish and Chips": "Fish & Chips",
+        "Fish Chips": "Fish & Chips",
 
-        "French Fries SBS":"French Fries",
-        "Fries":"French Fries",
+        "French Fries SBS": "French Fries",
+        "Fries": "French Fries",
 
-        "Sembodro Beef Burger":"Beef Burger",
-        "Burger":"Beef Burger",
+        "Sembodro Beef Burger": "Beef Burger",
+        "Burger": "Beef Burger",
 
-        "Sembodro Mix Platers":"Mix Platters",
-        "Sembodro Mix Platters":"Mix Platters",
-        "Mix Platers":"Mix Platters",
-        "Mix Platter":"Mix Platters"
+        "Sembodro Mix Platers": "Mix Platters",
+        "Sembodro Mix Platters": "Mix Platters",
+        "Mix Platers": "Mix Platters",
+        "Mix Platter": "Mix Platters",
       },
 
-      openingStock:{
-        "French Fries":30,
-        "Chicken Wings":20,
-        "Prawn Mayo":14,
-        "Mekencis":7,
-        "Beef Burger":30,
-        "Fish & Chips":15,
-        "Mix Platters":10
+      openingStock: {
+        "French Fries": 30,
+        "Chicken Wings": 20,
+        "Prawn Mayo": 14,
+        "Mekencis": 7,
+        "Beef Burger": 30,
+        "Fish & Chips": 15,
+        "Mix Platters": 10,
       },
 
-      reservations:{},
+      reservations: {},
+      manualSales: {},
+      sessionSales: {},
 
-      manualSales:{},
-
-      sessionSales:{},
-
-      sessions:{
-        weekday:{
-          "Sesi 1":"12:00-15:00",
-          "Sesi 2":"15:00-17:00"
+      sessions: {
+        weekday: {
+          "Sesi 1": "12:00-15:00",
+          "Sesi 2": "15:00-17:00",
         },
-
-        weekend:{
-          "Sesi 1":"10:00-12:00",
-          "Sesi 2":"12:00-15:00",
-          "Sesi 3":"15:00-17:00"
-        }
-      }
+        weekend: {
+          "Sesi 1": "10:00-12:00",
+          "Sesi 2": "12:00-15:00",
+          "Sesi 3": "15:00-17:00",
+        },
+      },
     };
 
     // ==============================
     // FILE
     // ==============================
 
-    const parts=[];
+    const parts = [];
 
-    for(const file of files){
-      if(!file.data||!file.type) continue;
+    for (const file of files) {
+      if (!file.data || !file.type) continue;
 
-      if(
-        file.type.startsWith("image/")||
-        file.type==="application/pdf"
-      ){
+      if (file.type.startsWith("image/") || file.type === "application/pdf") {
         parts.push({
-          inline_data:{
-            mime_type:file.type,
-            data:file.data
-          }
+          inline_data: {
+            mime_type: file.type,
+            data: file.data,
+          },
         });
       }
     }
@@ -111,13 +121,13 @@ export default async function handler(req,res){
     // ==============================
 
     parts.push({
-      text:`
+      text: `
 Kamu adalah NEX AI, AI khusus untuk membantu
 mengelola dan menghitung stok.
 
 DATA SISTEM:
 
-${JSON.stringify(stockData,null,2)}
+${JSON.stringify(stockData, null, 2)}
 
 ================================
 ATURAN STOK
@@ -265,66 +275,100 @@ Stok awal
 
 Pesan pengguna:
 
-${message||"Tolong analisis data yang saya kirim."}
-`
+${message || "Tolong analisis data yang saya kirim."}
+`,
     });
 
     // ==============================
-    // GEMINI
+    // GEMINI (dengan fallback)
     // ==============================
 
-    const response=await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
-      {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "x-goog-api-key":apiKey
+    const body = {
+      contents: [
+        {
+          role: "user",
+          parts,
         },
-        body:JSON.stringify({
-          contents:[
-            {
-              role:"user",
-              parts
-            }
-          ]
-        })
+      ],
+    };
+
+    const models = [PRIMARY_MODEL, FALLBACK_MODEL];
+    let reply = null;
+    let usedModel = null;
+    let lastError = "Gemini API gagal";
+    let lastStatus = 502;
+
+    for (let i = 0; i < models.length; i++) {
+      const model = models[i];
+      let response;
+
+      try {
+        response = await callGemini(model, apiKey, body);
+      } catch (e) {
+        // Error jaringan / timeout → coba model berikutnya
+        lastError = "Server error: " + e.message;
+        lastStatus = 502;
+        continue;
       }
-    );
 
-    const data=await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        lastError = "Respons Gemini tidak valid";
+        lastStatus = 502;
+        continue;
+      }
 
-    if(!response.ok){
-      console.error("Gemini error:",data);
+      if (!response.ok) {
+        console.error(`Gemini error [${model}]:`, data);
+        lastError = data?.error?.message || "Gemini API gagal";
+        lastStatus = response.status;
 
-      return res.status(response.status).json({
-        error:data?.error?.message||"Gemini API gagal"
-      });
-    }
+        // Kalau bukan error yang bisa diulang → jangan fallback
+        if (!RETRIABLE_STATUS.has(response.status)) {
+          return res.status(response.status).json({ error: lastError });
+        }
 
-    const reply=
-      data?.candidates?.[0]?.content?.parts
-        ?.filter(p=>p.text)
-        ?.map(p=>p.text)
+        // Retriable → lanjut ke model berikutnya
+        continue;
+      }
+
+      const text = data?.candidates?.[0]?.content?.parts
+        ?.filter((p) => p.text)
+        ?.map((p) => p.text)
         ?.join("\n")
         ?.trim();
 
-    if(!reply){
-      return res.status(500).json({
-        error:"Gemini tidak memberikan jawaban"
-      });
+      if (!text) {
+        lastError = "Gemini tidak memberikan jawaban";
+        lastStatus = 500;
+        continue;
+      }
+
+      reply = text;
+      usedModel = model;
+      break;
+    }
+
+    if (!reply) {
+      return res.status(lastStatus).json({ error: lastError });
+    }
+
+    if (usedModel === FALLBACK_MODEL) {
+      console.warn(`[fallback] ${PRIMARY_MODEL} gagal, dipakai ${FALLBACK_MODEL}`);
     }
 
     return res.status(200).json({
-      success:true,
-      reply
+      success: true,
+      model: usedModel, // <-- info model yang akhirnya dipakai
+      reply,
     });
-
-  }catch(error){
+  } catch (error) {
     console.error(error);
 
     return res.status(500).json({
-      error:"Terjadi kesalahan pada backend NEX AI"
+      error: "Terjadi kesalahan pada backend NEX AI",
     });
   }
 }
